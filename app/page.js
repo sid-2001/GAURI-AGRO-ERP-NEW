@@ -31,7 +31,14 @@ export default function Home() {
   const [inventory, setInventory] = useState([]);
   const [orders, setOrders] = useState([]);
 
-  const [bill, setBill] = useState({ date: new Date().toISOString().slice(0, 10), partyName: '', gstNumber: '', items: [] });
+  const [bill, setBill] = useState({
+    date: new Date().toISOString().slice(0, 10),
+    partyName: '',
+    gstNumber: '',
+    cgstRate: 9,
+    sgstRate: 9,
+    items: []
+  });
   const [transfer, setTransfer] = useState({ fromWarehouseId: '', toWarehouseId: '', productId: '', quantity: 0 });
   const [adjust, setAdjust] = useState({ productId: '', delta: 0 });
 
@@ -120,9 +127,11 @@ export default function Home() {
 
   const totals = useMemo(() => {
     const subtotal = billRows.reduce((s, r) => s + r.amount, 0);
-    const gst = subtotal * 0.18;
-    return { subtotal, gst, total: subtotal + gst };
-  }, [billRows]);
+    const cgstAmount = subtotal * (Number(bill.cgstRate || 0) / 100);
+    const sgstAmount = subtotal * (Number(bill.sgstRate || 0) / 100);
+    const gst = cgstAmount + sgstAmount;
+    return { subtotal, cgstAmount, sgstAmount, gst, total: subtotal + gst };
+  }, [billRows, bill.cgstRate, bill.sgstRate]);
 
   const loginSubmit = async (e) => {
     e.preventDefault();
@@ -298,8 +307,8 @@ ${rows}
 <tr>
 <th>Warehouse</th>
 <th>Taxable Value</th>
-<th>CGST 9%</th>
-<th>SGST 9%</th>
+<th>CGST ${Number(order.cgstRate || 9)}%</th>
+<th>SGST ${Number(order.sgstRate || 9)}%</th>
 <th>Total Tax</th>
 </tr>
 </thead>
@@ -309,8 +318,8 @@ ${rows}
 <tr>
 <td>${order.warehouseId}</td>
 <td>${fmt(order.subtotal)}</td>
-<td>${fmt(order.gstAmount / 2)}</td>
-<td>${fmt(order.gstAmount / 2)}</td>
+<td>${fmt(order.cgstAmount ?? (order.gstAmount / 2))}</td>
+<td>${fmt(order.sgstAmount ?? (order.gstAmount / 2))}</td>
 <td>${fmt(order.gstAmount)}</td>
 </tr>
 
@@ -527,6 +536,28 @@ window.print()
           <input placeholder="Party" value={bill.partyName} onChange={(e) => setBill({ ...bill, partyName: e.target.value })} />
           <input placeholder="GST optional" value={bill.gstNumber} onChange={(e) => setBill({ ...bill, gstNumber: e.target.value })} />
           <input type="date" value={bill.date} onChange={(e) => setBill({ ...bill, date: e.target.value })} />
+          <div className="line-item">
+            <label>
+              CGST %
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={bill.cgstRate}
+                onChange={(e) => setBill({ ...bill, cgstRate: Number(e.target.value) })}
+              />
+            </label>
+            <label>
+              SGST %
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={bill.sgstRate}
+                onChange={(e) => setBill({ ...bill, sgstRate: Number(e.target.value) })}
+              />
+            </label>
+          </div>
           <p>Products shown below are only from selected warehouse and with available stock.</p>
           {bill.items.map((it, idx) => (
             <div className="line-item" key={idx}>
@@ -545,7 +576,9 @@ window.print()
             </div>
           ))}
           <button onClick={() => setBill({ ...bill, items: [...bill.items, { productId: availableProducts[0]?._id || '', qty: 1 }] })}>+ Item</button>
-          <p>Total: {fmt(totals.total)}</p>
+          <p>
+            Subtotal: {fmt(totals.subtotal)} | CGST: {fmt(totals.cgstAmount)} | SGST: {fmt(totals.sgstAmount)} | Total: {fmt(totals.total)}
+          </p>
           <button onClick={saveBill}>Save Bill (deduct from selected warehouse)</button>
         </section>
       )}

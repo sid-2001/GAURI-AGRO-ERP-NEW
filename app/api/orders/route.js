@@ -27,7 +27,7 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { date, partyName, gstNumber, warehouseId, items } = await request.json();
+    const { date, partyName, gstNumber, warehouseId, items, cgstRate, sgstRate } = await request.json();
     if (!date || !partyName || !warehouseId || !Array.isArray(items) || !items.length) {
       return NextResponse.json({ error: 'Invalid bill data' }, { status: 400 });
     }
@@ -63,7 +63,11 @@ export async function POST(request) {
     }
 
     const subtotal = lineItems.reduce((sum, l) => sum + l.amount, 0);
-    const gstAmount = subtotal * 0.18;
+    const resolvedCgstRate = Number.isFinite(Number(cgstRate)) ? Number(cgstRate) : 9;
+    const resolvedSgstRate = Number.isFinite(Number(sgstRate)) ? Number(sgstRate) : 9;
+    const cgstAmount = subtotal * (resolvedCgstRate / 100);
+    const sgstAmount = subtotal * (resolvedSgstRate / 100);
+    const gstAmount = cgstAmount + sgstAmount;
     const total = subtotal + gstAmount;
 
     const order = {
@@ -73,8 +77,12 @@ export async function POST(request) {
       date,
       partyName,
       gstNumber: gstNumber || '',
+      cgstRate: resolvedCgstRate,
+      sgstRate: resolvedSgstRate,
       items: lineItems,
       subtotal,
+      cgstAmount,
+      sgstAmount,
       gstAmount,
       total,
       createdAt: new Date()
