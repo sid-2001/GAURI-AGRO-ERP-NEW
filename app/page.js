@@ -30,6 +30,8 @@ export default function Home() {
 
   const [inventory, setInventory] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [dashboardWarehouseFilter, setDashboardWarehouseFilter] = useState('all');
+  const [dashboardUserFilter, setDashboardUserFilter] = useState('all');
 
   const [bill, setBill] = useState({
     date: new Date().toISOString().slice(0, 10),
@@ -132,6 +134,30 @@ export default function Home() {
     const gst = cgstAmount + sgstAmount;
     return { subtotal, cgstAmount, sgstAmount, gst, total: subtotal + gst };
   }, [billRows, bill.cgstRate, bill.sgstRate]);
+
+  const dashboardWarehouseOptions = useMemo(() => {
+    const entries = allWarehouses.map((warehouse) => [warehouse._id, `${warehouse.name} - ${warehouse.location}`]);
+    return new Map(entries);
+  }, [allWarehouses]);
+
+  const dashboardUserOptions = useMemo(() => {
+    const adminView = users.map((u) => [u._id, u.username]);
+    if (user?.role === 'admin') return new Map(adminView);
+    return new Map(user ? [[user._id, user.username]] : []);
+  }, [users, user]);
+
+  const filteredDashboardOrders = useMemo(() => {
+    return orders.filter((order) => {
+      const warehouseMatch = dashboardWarehouseFilter === 'all' || order.warehouseId === dashboardWarehouseFilter;
+      const userMatch = dashboardUserFilter === 'all' || order.ownerUserId === dashboardUserFilter;
+      return warehouseMatch && userMatch;
+    });
+  }, [orders, dashboardWarehouseFilter, dashboardUserFilter]);
+
+  const filteredDashboardSales = useMemo(
+    () => filteredDashboardOrders.reduce((sum, order) => sum + Number(order.total || 0), 0),
+    [filteredDashboardOrders]
+  );
 
   const loginSubmit = async (e) => {
     e.preventDefault();
@@ -635,8 +661,30 @@ window.print()
       {tab === 'dashboard' && (
         <section className="card">
           <h2>Dashboard</h2>
-          <p>Total Orders: {orders.length}</p>
-          <p>Total Sales: {fmt(orders.reduce((s, o) => s + Number(o.total || 0), 0))}</p>
+          <div className="line-item">
+            <label>
+              Warehouse
+              <select value={dashboardWarehouseFilter} onChange={(e) => setDashboardWarehouseFilter(e.target.value)}>
+                <option value="all">All Warehouses</option>
+                {Array.from(dashboardWarehouseOptions.entries()).map(([id, label]) => (
+                  <option key={id} value={id}>{label}</option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              User
+              <select value={dashboardUserFilter} onChange={(e) => setDashboardUserFilter(e.target.value)}>
+                <option value="all">All Users</option>
+                {Array.from(dashboardUserOptions.entries()).map(([id, username]) => (
+                  <option key={id} value={id}>{username}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <p>Total Orders: {filteredDashboardOrders.length}</p>
+          <p>Total Sales: {fmt(filteredDashboardSales)}</p>
         </section>
       )}
 
