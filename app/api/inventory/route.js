@@ -63,8 +63,8 @@ export async function PATCH(request) {
       return NextResponse.json({ error: 'Warehouse not found' }, { status: 404 });
     }
 
-    if (role !== 'admin' && warehouse.ownerUserId !== userId) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (role !== 'admin') {
+      return NextResponse.json({ error: 'Only admin can set inventory quantity' }, { status: 403 });
     }
 
     await db.collection('inventory').updateOne(

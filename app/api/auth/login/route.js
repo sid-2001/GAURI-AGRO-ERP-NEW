@@ -19,7 +19,10 @@ export async function POST(request) {
       user: {
         _id: String(user._id),
         username: user.username,
-        role: user.role
+        role: user.role,
+        firmName: user.firmName || "",
+        gstNumber: user.gstNumber || "",
+        billingAddress: user.billingAddress || ""
       }
     });
   } catch (error) {

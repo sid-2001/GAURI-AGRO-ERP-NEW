@@ -12,21 +12,44 @@ const authHeaders = (user) => ({
 
 const fmt = (v) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(v || 0);
 
+const amountInWords = (value) => {
+  const num = Math.round(Number(value || 0));
+  if (!num) return 'Zero Rupees Only';
+  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+  const two = (n) => (n < 20 ? ones[n] : `${tens[Math.floor(n / 10)]}${n % 10 ? ` ${ones[n % 10]}` : ''}`);
+  const three = (n) => {
+    const h = Math.floor(n / 100);
+    const r = n % 100;
+    return `${h ? `${ones[h]} Hundred` : ''}${h && r ? ' ' : ''}${r ? two(r) : ''}`.trim();
+  };
+  let n = num;
+  const parts = [];
+  const crore = Math.floor(n / 10000000); n %= 10000000;
+  const lakh = Math.floor(n / 100000); n %= 100000;
+  const thousand = Math.floor(n / 1000); n %= 1000;
+  if (crore) parts.push(`${three(crore)} Crore`);
+  if (lakh) parts.push(`${three(lakh)} Lakh`);
+  if (thousand) parts.push(`${three(thousand)} Thousand`);
+  if (n) parts.push(three(n));
+  return `${parts.join(' ')} Rupees Only`;
+};
+
 export default function Home() {
   const [tab, setTab] = useState('billing');
   const [user, setUser] = useState(null);
   const [login, setLogin] = useState({ username: '', password: '' });
 
   const [users, setUsers] = useState([]);
-  const [newUser, setNewUser] = useState({ username: '', password: '', warehouseName: '', warehouseLocation: '' });
+  const [newUser, setNewUser] = useState({ username: '', password: '', warehouseName: '', warehouseLocation: '', firmName: '', gstNumber: '', billingAddress: '' });
 
   const [warehouses, setWarehouses] = useState([]);
   const [allWarehouses, setAllWarehouses] = useState([]);
   const [selectedWarehouse, setSelectedWarehouse] = useState('');
 
   const [products, setProducts] = useState([]);
-  const [newProduct, setNewProduct] = useState({ name: '', price: '' });
-  const [editingProduct, setEditingProduct] = useState({ id: '', name: '', price: '' });
+  const [newProduct, setNewProduct] = useState({ name: '', price: '', gstRate: '' });
+  const [editingProduct, setEditingProduct] = useState({ id: '', name: '', price: '', gstRate: '' });
 
   const [inventory, setInventory] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -37,25 +60,27 @@ export default function Home() {
     date: new Date().toISOString().slice(0, 10),
     partyName: '',
     gstNumber: '',
-    cgstRate: 9,
-    sgstRate: 9,
+    discountPercent: 0,
     items: []
   });
   const [transfer, setTransfer] = useState({ fromWarehouseId: '', toWarehouseId: '', productId: '', quantity: 0 });
   const [adjust, setAdjust] = useState({ productId: '', delta: 0 });
+  const [refillRequest, setRefillRequest] = useState({ productId: '', quantity: 0 });
+  const [refillRequests, setRefillRequests] = useState([]);
 
   const loadAll = async (u = user, wh = selectedWarehouse) => {
     if (!u) return;
     const h = authHeaders(u);
 
     const warehouseUrl = u.role === 'admin' ? '/api/warehouses?all=1' : '/api/warehouses';
-    const [pRes, wRes, oRes] = await Promise.all([
+    const [pRes, wRes, oRes, rRes] = await Promise.all([
       fetch('/api/products', { headers: h }),
       fetch(warehouseUrl, { headers: h }),
-      fetch('/api/orders', { headers: h })
+      fetch('/api/orders', { headers: h }),
+      fetch('/api/refill-requests', { headers: h })
     ]);
 
-    const [p, w, o] = await Promise.all([pRes.json(), wRes.json(), oRes.json()]);
+    const [p, w, o, r] = await Promise.all([pRes.json(), wRes.json(), oRes.json(), rRes.json()]);
     const productRows = Array.isArray(p) ? p : [];
     const warehouseRows = Array.isArray(w) ? w : [];
 
@@ -65,6 +90,7 @@ export default function Home() {
     const visibleWarehouses = u.role === 'admin' ? warehouseRows : warehouseRows.filter((x) => x.ownerUserId === u._id);
     setWarehouses(visibleWarehouses);
     setOrders(Array.isArray(o) ? o : []);
+    setRefillRequests(Array.isArray(r) ? r : []);
 
     const nextWarehouse = wh || visibleWarehouses[0]?._id || '';
     setSelectedWarehouse(nextWarehouse);
@@ -128,12 +154,17 @@ export default function Home() {
   );
 
   const totals = useMemo(() => {
-    const subtotal = billRows.reduce((s, r) => s + r.amount, 0);
-    const cgstAmount = subtotal * (Number(bill.cgstRate || 0) / 100);
-    const sgstAmount = subtotal * (Number(bill.sgstRate || 0) / 100);
-    const gst = cgstAmount + sgstAmount;
-    return { subtotal, cgstAmount, sgstAmount, gst, total: subtotal + gst };
-  }, [billRows, bill.cgstRate, bill.sgstRate]);
+    const subtotal = billRows.reduce((sum, row) => sum + row.amount, 0);
+    const discountPercent = Math.max(0, Number(bill.discountPercent || 0));
+    const discountAmount = subtotal * (discountPercent / 100);
+    const taxableSubtotal = Math.max(0, subtotal - discountAmount);
+    const weightedGstAmount = subtotal
+      ? billRows.reduce((sum, row) => sum + row.amount * (Number(row.gstRate || 0) / 100), 0) * (taxableSubtotal / subtotal)
+      : 0;
+    const cgstAmount = weightedGstAmount / 2;
+    const sgstAmount = weightedGstAmount / 2;
+    return { subtotal, discountAmount, taxableSubtotal, cgstAmount, sgstAmount, gst: weightedGstAmount, total: taxableSubtotal + weightedGstAmount };
+  }, [billRows, bill.discountPercent]);
 
   const dashboardWarehouseOptions = useMemo(() => {
     const entries = allWarehouses.map((warehouse) => [warehouse._id, `${warehouse.name} - ${warehouse.location}`]);
@@ -175,12 +206,12 @@ export default function Home() {
     const res = await fetch('/api/orders', {
       method: 'POST',
       headers: authHeaders(user),
-      body: JSON.stringify({ ...bill, warehouseId: selectedWarehouse, items: bill.items })
+      body: JSON.stringify({ ...bill, warehouseId: selectedWarehouse, items: bill.items, discountPercent: Number(bill.discountPercent || 0) })
     });
     const data = await res.json();
     if (!res.ok) return alert(data.error || 'Failed to save bill');
     alert(`Saved ${data.orderId}`);
-    setBill((prev) => ({ ...prev, partyName: '', gstNumber: '' }));
+    setBill((prev) => ({ ...prev, partyName: '', gstNumber: '', discountPercent: 0 }));
     await loadAll();
   };
 
@@ -293,7 +324,10 @@ State Name: Uttar Pradesh, Code: 09
 <tr>
 <td colspan="2">
 <b>Party:</b> ${order.partyName}<br>
-<b>GST:</b> ${order.gstNumber || "N/A"}
+<b>GST:</b> ${order.gstNumber || "N/A"}<br>
+<b>Vendor:</b> ${order.vendorFirmName || order.vendorUsername || "N/A"}<br>
+<b>Vendor GST:</b> ${order.vendorGstNumber || "N/A"}<br>
+<b>Billing Address:</b> ${order.vendorBillingAddress || "N/A"}
 </td>
 </tr>
 
@@ -325,6 +359,7 @@ ${rows}
 
 
 <h3 class="right">Amount Chargeable: ${fmt(order.subtotal)}</h3>
+<h3 class="right">Discount (${Number(order.discountPercent || 0)}%): ${fmt(order.discountAmount || 0)}</h3>
 
 
 <table>
@@ -333,8 +368,8 @@ ${rows}
 <tr>
 <th>Warehouse</th>
 <th>Taxable Value</th>
-<th>CGST ${Number(order.cgstRate || 9)}%</th>
-<th>SGST ${Number(order.sgstRate || 9)}%</th>
+<th>CGST</th>
+<th>SGST</th>
 <th>Total Tax</th>
 </tr>
 </thead>
@@ -343,7 +378,7 @@ ${rows}
 
 <tr>
 <td>${order.warehouseId}</td>
-<td>${fmt(order.subtotal)}</td>
+<td>${fmt(order.taxableSubtotal || order.subtotal)}</td>
 <td>${fmt(order.cgstAmount ?? (order.gstAmount / 2))}</td>
 <td>${fmt(order.sgstAmount ?? (order.gstAmount / 2))}</td>
 <td>${fmt(order.gstAmount)}</td>
@@ -355,6 +390,7 @@ ${rows}
 
 
 <h2 class="right">Net Amount: ${fmt(order.total)}</h2>
+<p><b>Amount in Words:</b> ${amountInWords(order.total)}</p>
 
 
 <div style="margin-top:20px">
@@ -475,7 +511,7 @@ window.print()
     const res = await fetch('/api/users', { method: 'POST', headers: authHeaders(user), body: JSON.stringify(newUser) });
     const data = await res.json();
     if (!res.ok) return alert(data.error || 'User create failed');
-    setNewUser({ username: '', password: '', warehouseName: '', warehouseLocation: '' });
+    setNewUser({ username: '', password: '', warehouseName: '', warehouseLocation: '', firmName: '', gstNumber: '', billingAddress: '' });
     await loadAll();
   };
 
@@ -498,11 +534,11 @@ window.print()
     const res = await fetch('/api/products', {
       method: 'POST',
       headers: authHeaders(user),
-      body: JSON.stringify({ name: newProduct.name, price: Number(newProduct.price) })
+      body: JSON.stringify({ name: newProduct.name, price: Number(newProduct.price), gstRate: Number(newProduct.gstRate || 0) })
     });
     const data = await res.json();
     if (!res.ok) return alert(data.error || 'Create product failed');
-    setNewProduct({ name: '', price: '' });
+    setNewProduct({ name: '', price: '', gstRate: '' });
     await loadAll();
   };
 
@@ -510,11 +546,34 @@ window.print()
     const res = await fetch('/api/products', {
       method: 'PATCH',
       headers: authHeaders(user),
-      body: JSON.stringify({ id: editingProduct.id, name: editingProduct.name, price: Number(editingProduct.price) })
+      body: JSON.stringify({ id: editingProduct.id, name: editingProduct.name, price: Number(editingProduct.price), gstRate: Number(editingProduct.gstRate || 0) })
     });
     const data = await res.json();
     if (!res.ok) return alert(data.error || 'Update product failed');
-    setEditingProduct({ id: '', name: '', price: '' });
+    setEditingProduct({ id: '', name: '', price: '', gstRate: '' });
+    await loadAll();
+  };
+
+  const createRefillRequest = async () => {
+    const res = await fetch('/api/refill-requests', {
+      method: 'POST',
+      headers: authHeaders(user),
+      body: JSON.stringify({ warehouseId: selectedWarehouse, productId: refillRequest.productId, quantity: Number(refillRequest.quantity) })
+    });
+    const data = await res.json();
+    if (!res.ok) return alert(data.error || 'Refill request failed');
+    setRefillRequest({ productId: '', quantity: 0 });
+    await loadAll();
+  };
+
+  const processRefillRequest = async (id, action) => {
+    const res = await fetch('/api/refill-requests', {
+      method: 'PATCH',
+      headers: authHeaders(user),
+      body: JSON.stringify({ id, action })
+    });
+    const data = await res.json();
+    if (!res.ok) return alert(data.error || 'Request action failed');
     await loadAll();
   };
 
@@ -562,28 +621,10 @@ window.print()
           <input placeholder="Party" value={bill.partyName} onChange={(e) => setBill({ ...bill, partyName: e.target.value })} />
           <input placeholder="GST optional" value={bill.gstNumber} onChange={(e) => setBill({ ...bill, gstNumber: e.target.value })} />
           <input type="date" value={bill.date} onChange={(e) => setBill({ ...bill, date: e.target.value })} />
-          <div className="line-item">
-            <label>
-              CGST %
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={bill.cgstRate}
-                onChange={(e) => setBill({ ...bill, cgstRate: Number(e.target.value) })}
-              />
-            </label>
-            <label>
-              SGST %
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={bill.sgstRate}
-                onChange={(e) => setBill({ ...bill, sgstRate: Number(e.target.value) })}
-              />
-            </label>
-          </div>
+          <label>
+            Discount %
+            <input type="number" min="0" step="0.01" value={bill.discountPercent} onChange={(e) => setBill({ ...bill, discountPercent: Number(e.target.value) })} />
+          </label>
           <p>Products shown below are only from selected warehouse and with available stock.</p>
           {bill.items.map((it, idx) => (
             <div className="line-item" key={idx}>
@@ -603,7 +644,7 @@ window.print()
           ))}
           <button onClick={() => setBill({ ...bill, items: [...bill.items, { productId: availableProducts[0]?._id || '', qty: 1 }] })}>+ Item</button>
           <p>
-            Subtotal: {fmt(totals.subtotal)} | CGST: {fmt(totals.cgstAmount)} | SGST: {fmt(totals.sgstAmount)} | Total: {fmt(totals.total)}
+            Subtotal: {fmt(totals.subtotal)} | Discount: {fmt(totals.discountAmount)} | CGST: {fmt(totals.cgstAmount)} | SGST: {fmt(totals.sgstAmount)} | Total: {fmt(totals.total)}
           </p>
           <button onClick={saveBill}>Save Bill (deduct from selected warehouse)</button>
         </section>
@@ -611,14 +652,14 @@ window.print()
 
       {tab === 'inventory' && (
         <section className="card">
-          <h2>Inventory Manual Manage</h2>
+          <h2>Inventory Manage</h2>
           <div className="line-item">
             <select value={adjust.productId} onChange={(e) => setAdjust({ ...adjust, productId: e.target.value })}>
               <option value="">select product</option>
               {products.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
             </select>
             <input type="number" value={adjust.delta} onChange={(e) => setAdjust({ ...adjust, delta: Number(e.target.value) })} />
-            <button onClick={adjustInventory}>Adjust +/-</button>
+            <button onClick={adjustInventory}>{user.role === 'admin' ? 'Adjust +/-' : 'Deduct'}</button>
           </div>
           <table>
             <thead><tr><th>Product</th><th>Qty</th><th>Set Qty</th></tr></thead>
@@ -627,11 +668,25 @@ window.print()
                 <tr key={r._id}>
                   <td>{r.product?.name}</td>
                   <td>{r.quantity}</td>
-                  <td><input type="number" defaultValue={r.quantity} onBlur={(e) => patchInventory(r.productId, Number(e.target.value))} /></td>
+                  <td>{user.role === 'admin' ? <input type="number" defaultValue={r.quantity} onBlur={(e) => patchInventory(r.productId, Number(e.target.value))} /> : 'Admin only'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+
+          {user.role !== 'admin' && (
+            <>
+              <h3>Request Refill from Admin</h3>
+              <div className="line-item">
+                <select value={refillRequest.productId} onChange={(e) => setRefillRequest({ ...refillRequest, productId: e.target.value })}>
+                  <option value="">product</option>
+                  {products.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
+                </select>
+                <input type="number" value={refillRequest.quantity} onChange={(e) => setRefillRequest({ ...refillRequest, quantity: Number(e.target.value) })} />
+                <button onClick={createRefillRequest}>Request Refill</button>
+              </div>
+            </>
+          )}
         </section>
       )}
 
@@ -639,11 +694,12 @@ window.print()
         <section className="card">
           <h2>Orders</h2>
           <table>
-            <thead><tr><th>ID</th><th>Warehouse</th><th>Party</th><th>Total</th><th>Action</th></tr></thead>
+            <thead><tr><th>ID</th><th>Type</th><th>Warehouse</th><th>Party</th><th>Total</th><th>Action</th></tr></thead>
             <tbody>
               {orders.map((o) => (
                 <tr key={o._id}>
                   <td>{o.orderId}</td>
+                  <td>{o.orderType || 'sale'}</td>
                   <td>{o.warehouseId}</td>
                   <td>{o.partyName}</td>
                   <td>{fmt(o.total)}</td>
@@ -696,6 +752,9 @@ window.print()
             <input placeholder="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
             <input placeholder="first warehouse name" value={newUser.warehouseName} onChange={(e) => setNewUser({ ...newUser, warehouseName: e.target.value })} />
             <input placeholder="first warehouse location" value={newUser.warehouseLocation} onChange={(e) => setNewUser({ ...newUser, warehouseLocation: e.target.value })} />
+            <input placeholder="Firm name" value={newUser.firmName} onChange={(e) => setNewUser({ ...newUser, firmName: e.target.value })} />
+            <input placeholder="Vendor GST" value={newUser.gstNumber} onChange={(e) => setNewUser({ ...newUser, gstNumber: e.target.value })} />
+            <input placeholder="Billing address" value={newUser.billingAddress} onChange={(e) => setNewUser({ ...newUser, billingAddress: e.target.value })} />
             <button onClick={createUser}>Create User</button>
           </div>
           <h3>Users</h3>
@@ -705,6 +764,7 @@ window.print()
           <div className="line-item">
             <input placeholder="name" value={newProduct.name} onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })} />
             <input type="number" placeholder="price" value={newProduct.price} onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })} />
+            <input type="number" placeholder="GST %" value={newProduct.gstRate} onChange={(e) => setNewProduct({ ...newProduct, gstRate: e.target.value })} />
             <button onClick={createProduct}>Create Product</button>
           </div>
 
@@ -712,13 +772,14 @@ window.print()
           <div className="line-item">
             <select value={editingProduct.id} onChange={(e) => {
               const p = products.find((x) => x._id === e.target.value);
-              setEditingProduct({ id: p?._id || '', name: p?.name || '', price: p?.price || '' });
+              setEditingProduct({ id: p?._id || '', name: p?.name || '', price: p?.price || '', gstRate: p?.gstRate || '' });
             }}>
               <option value="">select product</option>
               {products.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
             </select>
             <input placeholder="name" value={editingProduct.name} onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })} />
             <input type="number" placeholder="price" value={editingProduct.price} onChange={(e) => setEditingProduct({ ...editingProduct, price: e.target.value })} />
+            <input type="number" placeholder="GST %" value={editingProduct.gstRate} onChange={(e) => setEditingProduct({ ...editingProduct, gstRate: e.target.value })} />
             <button onClick={updateProduct}>Update Product</button>
           </div>
 
@@ -739,6 +800,31 @@ window.print()
             <input type="number" value={transfer.quantity} onChange={(e) => setTransfer({ ...transfer, quantity: Number(e.target.value) })} />
             <button onClick={transferInventory}>Transfer</button>
           </div>
+
+          <h3>Vendor Refill Requests</h3>
+          <table>
+            <thead><tr><th>Vendor</th><th>Product</th><th>Qty</th><th>Status</th><th>Action</th></tr></thead>
+            <tbody>
+              {refillRequests.map((r) => (
+                <tr key={r._id}>
+                  <td>{r.vendorFirmName || r.vendorUserId}</td>
+                  <td>{r.productName}</td>
+                  <td>{r.quantity}</td>
+                  <td>{r.status}</td>
+                  <td>
+                    {r.status === 'pending' ? (
+                      <>
+                        <button onClick={() => processRefillRequest(r._id, 'approve')}>Approve</button>
+                        <button onClick={() => processRefillRequest(r._id, 'reject')}>Reject</button>
+                      </>
+                    ) : (
+                      '-'
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </section>
       )}
     </main>

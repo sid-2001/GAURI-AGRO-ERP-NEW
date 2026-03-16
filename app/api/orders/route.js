@@ -2,6 +2,14 @@ import { NextResponse } from 'next/server';
 import { ObjectId } from 'mongodb';
 import { ensureSystemSeed } from '../../../lib/bootstrap';
 
+const formatUserSnapshot = (user) => ({
+  vendorId: String(user?._id || ''),
+  vendorUsername: user?.username || '',
+  vendorFirmName: user?.firmName || '',
+  vendorGstNumber: user?.gstNumber || '',
+  vendorBillingAddress: user?.billingAddress || ''
+});
+
 export async function GET(request) {
   try {
     const role = request.headers.get('x-user-role');
@@ -27,7 +35,7 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { date, partyName, gstNumber, warehouseId, items, cgstRate, sgstRate } = await request.json();
+    const { date, partyName, gstNumber, warehouseId, items, discountPercent } = await request.json();
     if (!date || !partyName || !warehouseId || !Array.isArray(items) || !items.length) {
       return NextResponse.json({ error: 'Invalid bill data' }, { status: 400 });
     }
@@ -41,6 +49,7 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Forbidden warehouse access' }, { status: 403 });
     }
 
+    const owner = await db.collection('users').findOne({ _id: new ObjectId(warehouse.ownerUserId) });
     const products = await db.collection('products').find({ _id: { $in: items.map((i) => new ObjectId(i.productId)) } }).toArray();
     const productMap = new Map(products.map((p) => [String(p._id), p]));
 
@@ -55,7 +64,10 @@ export async function POST(request) {
       if (!stock || stock.quantity < qty) {
         return NextResponse.json({ error: `Insufficient stock for ${product.name}` }, { status: 400 });
       }
-      lineItems.push({ productId: String(product._id), name: product.name, price: product.price, qty, amount: qty * product.price });
+      const amount = qty * product.price;
+      const gstRate = Number(product.gstRate || 0);
+      const gstAmount = amount * (gstRate / 100);
+      lineItems.push({ productId: String(product._id), name: product.name, price: product.price, qty, gstRate, amount, gstAmount });
     }
 
     for (const line of lineItems) {
@@ -63,12 +75,13 @@ export async function POST(request) {
     }
 
     const subtotal = lineItems.reduce((sum, l) => sum + l.amount, 0);
-    const resolvedCgstRate = Number.isFinite(Number(cgstRate)) ? Number(cgstRate) : 9;
-    const resolvedSgstRate = Number.isFinite(Number(sgstRate)) ? Number(sgstRate) : 9;
-    const cgstAmount = subtotal * (resolvedCgstRate / 100);
-    const sgstAmount = subtotal * (resolvedSgstRate / 100);
-    const gstAmount = cgstAmount + sgstAmount;
-    const total = subtotal + gstAmount;
+    const resolvedDiscount = Math.max(0, Number(discountPercent || 0));
+    const discountAmount = subtotal * (resolvedDiscount / 100);
+    const taxableSubtotal = Math.max(0, subtotal - discountAmount);
+    const gstAmount = lineItems.reduce((sum, l) => sum + l.gstAmount, 0) * (taxableSubtotal / (subtotal || 1));
+    const cgstAmount = gstAmount / 2;
+    const sgstAmount = gstAmount / 2;
+    const total = taxableSubtotal + gstAmount;
 
     const order = {
       orderId: `ORD-${Date.now()}`,
@@ -77,14 +90,16 @@ export async function POST(request) {
       date,
       partyName,
       gstNumber: gstNumber || '',
-      cgstRate: resolvedCgstRate,
-      sgstRate: resolvedSgstRate,
+      discountPercent: resolvedDiscount,
+      discountAmount,
       items: lineItems,
       subtotal,
+      taxableSubtotal,
       cgstAmount,
       sgstAmount,
       gstAmount,
       total,
+      ...formatUserSnapshot(owner),
       createdAt: new Date()
     };
 

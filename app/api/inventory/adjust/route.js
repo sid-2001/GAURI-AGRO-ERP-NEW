@@ -6,6 +6,11 @@ export async function POST(request) {
   try {
     const role = request.headers.get('x-user-role');
     const userId = request.headers.get('x-user-id');
+
+    if (!role || !userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { warehouseId, productId, delta } = await request.json();
     const qty = Number(delta || 0);
 
@@ -21,6 +26,10 @@ export async function POST(request) {
 
     if (role !== 'admin' && warehouse.ownerUserId !== userId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    if (role !== 'admin' && qty > 0) {
+      return NextResponse.json({ error: 'Vendors can only deduct inventory' }, { status: 403 });
     }
 
     const current = await db.collection('inventory').findOne({ warehouseId, productId });

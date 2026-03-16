@@ -29,9 +29,12 @@ export async function POST(request) {
     const password = String(body.password || '').trim();
     const warehouseName = String(body.warehouseName || '').trim() || `${username} Main`;
     const warehouseLocation = String(body.warehouseLocation || '').trim() || 'Default';
+    const firmName = String(body.firmName || '').trim();
+    const gstNumber = String(body.gstNumber || '').trim();
+    const billingAddress = String(body.billingAddress || '').trim();
 
-    if (!username || !password) {
-      return NextResponse.json({ error: 'Username and password are required' }, { status: 400 });
+    if (!username || !password || !firmName || !gstNumber || !billingAddress) {
+      return NextResponse.json({ error: 'Username, password, firm name, GST number and billing address are required' }, { status: 400 });
     }
 
     const db = await ensureSystemSeed();
@@ -40,7 +43,15 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Username already exists' }, { status: 400 });
     }
 
-    const userRes = await db.collection('users').insertOne({ username, password, role: 'user', createdAt: new Date() });
+    const userRes = await db.collection('users').insertOne({
+      username,
+      password,
+      role: 'user',
+      firmName,
+      gstNumber,
+      billingAddress,
+      createdAt: new Date()
+    });
     const userId = String(userRes.insertedId);
     await db.collection('warehouses').insertOne({ ownerUserId: userId, name: warehouseName, location: warehouseLocation, createdAt: new Date() });
 

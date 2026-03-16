@@ -19,13 +19,13 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Only admin can create products' }, { status: 403 });
     }
 
-    const { name, price } = await request.json();
-    if (!name || Number(price) <= 0) {
+    const { name, price, gstRate } = await request.json();
+    if (!name || Number(price) <= 0 || Number(gstRate || 0) < 0) {
       return NextResponse.json({ error: 'Invalid product data' }, { status: 400 });
     }
 
     const db = await ensureSystemSeed();
-    const result = await db.collection('products').insertOne({ name: String(name).trim(), price: Number(price) });
+    const result = await db.collection('products').insertOne({ name: String(name).trim(), price: Number(price), gstRate: Number(gstRate || 0) });
     return NextResponse.json({ success: true, id: String(result.insertedId) }, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -39,15 +39,15 @@ export async function PATCH(request) {
       return NextResponse.json({ error: 'Only admin can edit products' }, { status: 403 });
     }
 
-    const { id, name, price } = await request.json();
-    if (!id || !name || Number(price) <= 0) {
+    const { id, name, price, gstRate } = await request.json();
+    if (!id || !name || Number(price) <= 0 || Number(gstRate || 0) < 0) {
       return NextResponse.json({ error: 'Invalid product update data' }, { status: 400 });
     }
 
     const db = await ensureSystemSeed();
     const result = await db.collection('products').updateOne(
       { _id: new ObjectId(id) },
-      { $set: { name: String(name).trim(), price: Number(price) } }
+      { $set: { name: String(name).trim(), price: Number(price), gstRate: Number(gstRate || 0) } }
     );
 
     if (!result.matchedCount) {
