@@ -130,8 +130,8 @@ export async function DELETE(request) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
-    if (role !== 'admin' && order.ownerUserId !== userId) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (role !== 'admin') {
+      return NextResponse.json({ error: 'Only admin can delete bills' }, { status: 403 });
     }
 
     for (const line of order.items || []) {

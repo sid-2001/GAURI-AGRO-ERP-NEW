@@ -67,6 +67,7 @@ export default function Home() {
   const [adjust, setAdjust] = useState({ productId: '', delta: 0 });
   const [refillRequest, setRefillRequest] = useState({ productId: '', quantity: 0 });
   const [refillRequests, setRefillRequests] = useState([]);
+  const [successMessage, setSuccessMessage] = useState('');
 
   const loadAll = async (u = user, wh = selectedWarehouse) => {
     if (!u) return;
@@ -199,6 +200,7 @@ export default function Home() {
     });
     const data = await res.json();
     if (!res.ok) return alert(data.error || 'Login failed');
+    setSuccessMessage('Login successful');
     setUser(data.user);
   };
 
@@ -210,7 +212,7 @@ export default function Home() {
     });
     const data = await res.json();
     if (!res.ok) return alert(data.error || 'Failed to save bill');
-    alert(`Saved ${data.orderId}`);
+    setSuccessMessage(`Bill saved successfully: ${data.orderId}`);
     setBill((prev) => ({ ...prev, partyName: '', gstNumber: '', discountPercent: 0 }));
     await loadAll();
   };
@@ -219,6 +221,7 @@ export default function Home() {
     const res = await fetch(`/api/orders?id=${id}`, { method: 'DELETE', headers: authHeaders(user) });
     const data = await res.json();
     if (!res.ok) return alert(data.error || 'Delete failed');
+    setSuccessMessage('Bill deleted and stock restored successfully');
     await loadAll();
   };
 
@@ -482,6 +485,7 @@ window.print()
     });
     const data = await res.json();
     if (!res.ok) return alert(data.error || 'Inventory update failed');
+    setSuccessMessage('Inventory quantity updated successfully');
     await loadAll();
   };
 
@@ -493,6 +497,7 @@ window.print()
     });
     const data = await res.json();
     if (!res.ok) return alert(data.error || 'Adjustment failed');
+    setSuccessMessage('Inventory adjusted successfully');
     await loadAll();
   };
 
@@ -504,6 +509,7 @@ window.print()
     });
     const data = await res.json();
     if (!res.ok) return alert(data.error || 'Transfer failed');
+    setSuccessMessage('Inventory transfer completed successfully');
     await loadAll();
   };
 
@@ -511,6 +517,7 @@ window.print()
     const res = await fetch('/api/users', { method: 'POST', headers: authHeaders(user), body: JSON.stringify(newUser) });
     const data = await res.json();
     if (!res.ok) return alert(data.error || 'User create failed');
+    setSuccessMessage('Vendor created successfully');
     setNewUser({ username: '', password: '', warehouseName: '', warehouseLocation: '', firmName: '', gstNumber: '', billingAddress: '' });
     await loadAll();
   };
@@ -527,6 +534,7 @@ window.print()
     });
     const data = await res.json();
     if (!res.ok) return alert(data.error || 'Warehouse create failed');
+    setSuccessMessage('Warehouse created successfully');
     await loadAll();
   };
 
@@ -538,6 +546,7 @@ window.print()
     });
     const data = await res.json();
     if (!res.ok) return alert(data.error || 'Create product failed');
+    setSuccessMessage('Product created successfully');
     setNewProduct({ name: '', price: '', gstRate: '' });
     await loadAll();
   };
@@ -550,6 +559,7 @@ window.print()
     });
     const data = await res.json();
     if (!res.ok) return alert(data.error || 'Update product failed');
+    setSuccessMessage('Product updated successfully');
     setEditingProduct({ id: '', name: '', price: '', gstRate: '' });
     await loadAll();
   };
@@ -562,6 +572,7 @@ window.print()
     });
     const data = await res.json();
     if (!res.ok) return alert(data.error || 'Refill request failed');
+    setSuccessMessage('Refill request submitted successfully');
     setRefillRequest({ productId: '', quantity: 0 });
     await loadAll();
   };
@@ -574,6 +585,7 @@ window.print()
     });
     const data = await res.json();
     if (!res.ok) return alert(data.error || 'Request action failed');
+    setSuccessMessage(`Request ${action}d successfully`);
     await loadAll();
   };
 
@@ -601,6 +613,8 @@ window.print()
         <button onClick={() => { localStorage.removeItem('erp_user'); setUser(null); }}>Logout</button>
       </header>
 
+      {successMessage && <p style={{ color: '#0f7a1a', fontWeight: 600 }}>{successMessage}</p>}
+
       <div className="tabs">
         {TABS.filter((t) => user.role === 'admin' || t !== 'admin').map((t) => (
           <button key={t} className={tab === t ? 'tab active' : 'tab'} onClick={() => setTab(t)}>{t}</button>
@@ -612,7 +626,7 @@ window.print()
         <select value={selectedWarehouse} onChange={(e) => { setSelectedWarehouse(e.target.value); loadAll(user, e.target.value); }}>
           {warehouses.map((w) => <option key={w._id} value={w._id}>{w.name} - {w.location}</option>)}
         </select>
-        <button onClick={createWarehouse}>+ Add Warehouse</button>
+        {user.role === 'admin' && <button onClick={createWarehouse}>+ Add Warehouse</button>}
       </section>
 
       {tab === 'billing' && (
@@ -705,7 +719,7 @@ window.print()
                   <td>{fmt(o.total)}</td>
                   <td>
                     <button onClick={() => downloadOrderPdf(o)}>PDF</button>
-                    <button onClick={() => deleteBill(o._id)}>Delete bill (restore stock)</button>
+                    {user.role === 'admin' && <button onClick={() => deleteBill(o._id)}>Delete bill (restore stock)</button>}
                   </td>
                 </tr>
               ))}
