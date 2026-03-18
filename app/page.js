@@ -67,7 +67,7 @@ export default function Home() {
   const [adjust, setAdjust] = useState({ productId: '', delta: 0 });
   const [refillRequest, setRefillRequest] = useState({ productId: '', quantity: 0 });
   const [refillRequests, setRefillRequests] = useState([]);
-  const [successMessage, setSuccessMessage] = useState('');
+  const [popup, setPopup] = useState({ open: false, type: 'success', message: '' });
 
   const loadAll = async (u = user, wh = selectedWarehouse) => {
     if (!u) return;
@@ -191,6 +191,13 @@ export default function Home() {
     [filteredDashboardOrders]
   );
 
+  const notify = (type, message) => {
+    setPopup({ open: true, type, message });
+    setTimeout(() => {
+      setPopup((prev) => (prev.message === message ? { ...prev, open: false } : prev));
+    }, 2600);
+  };
+
   const loginSubmit = async (e) => {
     e.preventDefault();
     const res = await fetch('/api/auth/login', {
@@ -199,8 +206,8 @@ export default function Home() {
       body: JSON.stringify(login)
     });
     const data = await res.json();
-    if (!res.ok) return alert(data.error || 'Login failed');
-    setSuccessMessage('Login successful');
+    if (!res.ok) return notify('error', data.error || 'Login failed');
+    notify('success', 'Login successful');
     setUser(data.user);
   };
 
@@ -211,8 +218,8 @@ export default function Home() {
       body: JSON.stringify({ ...bill, warehouseId: selectedWarehouse, items: bill.items, discountPercent: Number(bill.discountPercent || 0) })
     });
     const data = await res.json();
-    if (!res.ok) return alert(data.error || 'Failed to save bill');
-    setSuccessMessage(`Bill saved successfully: ${data.orderId}`);
+    if (!res.ok) return notify('error', data.error || 'Failed to save bill');
+    notify('success', `Bill saved successfully: ${data.orderId}`);
     setBill((prev) => ({ ...prev, partyName: '', gstNumber: '', discountPercent: 0 }));
     await loadAll();
   };
@@ -220,8 +227,8 @@ export default function Home() {
   const deleteBill = async (id) => {
     const res = await fetch(`/api/orders?id=${id}`, { method: 'DELETE', headers: authHeaders(user) });
     const data = await res.json();
-    if (!res.ok) return alert(data.error || 'Delete failed');
-    setSuccessMessage('Bill deleted and stock restored successfully');
+    if (!res.ok) return notify('error', data.error || 'Delete failed');
+    notify('success', 'Bill deleted and stock restored successfully');
     await loadAll();
   };
 
@@ -234,9 +241,11 @@ const downloadOrderPdf = (order) => {
       <tr>
         <td>${i + 1}</td>
         <td>${item.name}</td>
-        <td>${order.warehouseId}</td>
+        <td>${item.productId}</td>
         <td>${item.qty}</td>
         <td>${fmt(item.price)}</td>
+        <td>${Number(item.gstRate || 0)}%</td>
+        <td>${fmt(item.gstAmount || 0)}</td>
         <td>${fmt(item.amount)}</td>
       </tr>
     `
@@ -344,9 +353,11 @@ State Name: Uttar Pradesh, Code: 09
 <tr>
 <th>Sl No</th>
 <th>Description</th>
-<th>Warehouse</th>
+<th>Product ID</th>
 <th>Qty</th>
 <th>Rate</th>
+<th>GST %</th>
+<th>GST Amount</th>
 <th>Amount</th>
 </tr>
 
@@ -435,47 +446,12 @@ window.print()
 `;
 
   const win = window.open("", "_blank");
-  if (!win) return alert("Enable popups");
+  if (!win) return notify('error', 'Enable popups to download the bill');
+  notify('success', `Download opened for ${order.orderId}`);
 
   win.document.write(html);
   win.document.close();
 };
-  // const downloadOrderPdf = (order) => {
-  //   const rows = (order.items || [])
-  //     .map((item) => `<tr><td>${item.name}</td><td>${item.qty}</td><td>${fmt(item.price)}</td><td>${fmt(item.amount)}</td></tr>`)
-  //     .join('');
-
-  //   const html = `
-  //     <html>
-  //     <head>
-  //       <title>${order.orderId}</title>
-  //       <style>
-  //         body { font-family: Arial; padding:16px; }
-  //         h1 { color:#0f5f1c; }
-  //         table { width:100%; border-collapse: collapse; margin-top:12px; }
-  //         th, td { border:1px solid #222; padding:8px; text-align:left; }
-  //         th { background:#111; color:#77ff66; }
-  //       </style>
-  //     </head>
-  //     <body>
-  //       <h1>GAURI AGRO BILL - ${order.orderId}</h1>
-  //       <p><b>Date:</b> ${order.date}</p>
-  //       <p><b>Party:</b> ${order.partyName}</p>
-  //       <p><b>GST:</b> ${order.gstNumber || 'N/A'}</p>
-  //       <table><thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>
-  //       <h3>Subtotal: ${fmt(order.subtotal)}</h3>
-  //       <h3>GST: ${fmt(order.gstAmount)}</h3>
-  //       <h2>Total: ${fmt(order.total)}</h2>
-  //       <script>window.print()</script>
-  //     </body>
-  //     </html>
-  //   `;
-
-  //   const printWindow = window.open('', '_blank');
-  //   if (!printWindow) return alert('Enable popups to download PDF');
-  //   printWindow.document.write(html);
-  //   printWindow.document.close();
-  // };
 
   const patchInventory = async (productId, quantity) => {
     const res = await fetch('/api/inventory', {
@@ -484,8 +460,8 @@ window.print()
       body: JSON.stringify({ warehouseId: selectedWarehouse, productId, quantity: Number(quantity) })
     });
     const data = await res.json();
-    if (!res.ok) return alert(data.error || 'Inventory update failed');
-    setSuccessMessage('Inventory quantity updated successfully');
+    if (!res.ok) return notify('error', data.error || 'Inventory update failed');
+    notify('success', 'Inventory quantity updated successfully');
     await loadAll();
   };
 
@@ -496,8 +472,8 @@ window.print()
       body: JSON.stringify({ warehouseId: selectedWarehouse, productId: adjust.productId, delta: Number(adjust.delta) })
     });
     const data = await res.json();
-    if (!res.ok) return alert(data.error || 'Adjustment failed');
-    setSuccessMessage('Inventory adjusted successfully');
+    if (!res.ok) return notify('error', data.error || 'Adjustment failed');
+    notify('success', 'Inventory adjusted successfully');
     await loadAll();
   };
 
@@ -508,16 +484,16 @@ window.print()
       body: JSON.stringify({ ...transfer, quantity: Number(transfer.quantity) })
     });
     const data = await res.json();
-    if (!res.ok) return alert(data.error || 'Transfer failed');
-    setSuccessMessage('Inventory transfer completed successfully');
+    if (!res.ok) return notify('error', data.error || 'Transfer failed');
+    notify('success', 'Inventory transfer completed successfully');
     await loadAll();
   };
 
   const createUser = async () => {
     const res = await fetch('/api/users', { method: 'POST', headers: authHeaders(user), body: JSON.stringify(newUser) });
     const data = await res.json();
-    if (!res.ok) return alert(data.error || 'User create failed');
-    setSuccessMessage('Vendor created successfully');
+    if (!res.ok) return notify('error', data.error || 'User create failed');
+    notify('success', 'Vendor created successfully');
     setNewUser({ username: '', password: '', warehouseName: '', warehouseLocation: '', firmName: '', gstNumber: '', billingAddress: '' });
     await loadAll();
   };
@@ -533,8 +509,8 @@ window.print()
       body: JSON.stringify({ name, location, ownerUserId: ownerId })
     });
     const data = await res.json();
-    if (!res.ok) return alert(data.error || 'Warehouse create failed');
-    setSuccessMessage('Warehouse created successfully');
+    if (!res.ok) return notify('error', data.error || 'Warehouse create failed');
+    notify('success', 'Warehouse created successfully');
     await loadAll();
   };
 
@@ -545,8 +521,8 @@ window.print()
       body: JSON.stringify({ name: newProduct.name, price: Number(newProduct.price), gstRate: Number(newProduct.gstRate || 0) })
     });
     const data = await res.json();
-    if (!res.ok) return alert(data.error || 'Create product failed');
-    setSuccessMessage('Product created successfully');
+    if (!res.ok) return notify('error', data.error || 'Create product failed');
+    notify('success', 'Product created successfully');
     setNewProduct({ name: '', price: '', gstRate: '' });
     await loadAll();
   };
@@ -558,8 +534,8 @@ window.print()
       body: JSON.stringify({ id: editingProduct.id, name: editingProduct.name, price: Number(editingProduct.price), gstRate: Number(editingProduct.gstRate || 0) })
     });
     const data = await res.json();
-    if (!res.ok) return alert(data.error || 'Update product failed');
-    setSuccessMessage('Product updated successfully');
+    if (!res.ok) return notify('error', data.error || 'Update product failed');
+    notify('success', 'Product updated successfully');
     setEditingProduct({ id: '', name: '', price: '', gstRate: '' });
     await loadAll();
   };
@@ -571,8 +547,8 @@ window.print()
       body: JSON.stringify({ warehouseId: selectedWarehouse, productId: refillRequest.productId, quantity: Number(refillRequest.quantity) })
     });
     const data = await res.json();
-    if (!res.ok) return alert(data.error || 'Refill request failed');
-    setSuccessMessage('Refill request submitted successfully');
+    if (!res.ok) return notify('error', data.error || 'Refill request failed');
+    notify('success', 'Refill request submitted successfully');
     setRefillRequest({ productId: '', quantity: 0 });
     await loadAll();
   };
@@ -584,8 +560,8 @@ window.print()
       body: JSON.stringify({ id, action })
     });
     const data = await res.json();
-    if (!res.ok) return alert(data.error || 'Request action failed');
-    setSuccessMessage(`Request ${action}d successfully`);
+    if (!res.ok) return notify('error', data.error || 'Request action failed');
+    notify('success', `Request ${action}d successfully`);
     await loadAll();
   };
 
@@ -613,7 +589,12 @@ window.print()
         <button onClick={() => { localStorage.removeItem('erp_user'); setUser(null); }}>Logout</button>
       </header>
 
-      {successMessage && <p style={{ color: '#0f7a1a', fontWeight: 600 }}>{successMessage}</p>}
+      {popup.open && (
+        <div className={`popup ${popup.type === 'error' ? 'error' : 'success'}`}>
+          <span>{popup.message}</span>
+          <button type="button" onClick={() => setPopup((prev) => ({ ...prev, open: false }))}>✕</button>
+        </div>
+      )}
 
       <div className="tabs">
         {TABS.filter((t) => user.role === 'admin' || t !== 'admin').map((t) => (
@@ -719,7 +700,7 @@ window.print()
                   <td>{fmt(o.total)}</td>
                   <td>
                     <button onClick={() => downloadOrderPdf(o)}>PDF</button>
-                    {user.role === 'admin' && <button onClick={() => deleteBill(o._id)}>Delete bill (restore stock)</button>}
+                    <button onClick={() => deleteBill(o._id)}>Delete bill (restore stock)</button>
                   </td>
                 </tr>
               ))}
